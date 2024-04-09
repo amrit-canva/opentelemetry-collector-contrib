@@ -33,6 +33,7 @@ type exporterMetrics map[*wrappedExporter]pmetric.Metrics
 type metricExporterImp struct {
 	loadBalancer *loadBalancer
 	routingKey   routingKey
+	resourceKeys []string
 
 	stopped    bool
 	shutdownWg sync.WaitGroup
@@ -49,7 +50,11 @@ func newMetricsExporter(params exporter.CreateSettings, cfg component.Config) (*
 		return nil, err
 	}
 
-	metricExporter := metricExporterImp{loadBalancer: lb, routingKey: svcRouting}
+	metricExporter := metricExporterImp{
+		loadBalancer: lb,
+		routingKey:   svcRouting,
+		resourceKeys: cfg.(*Config).ResourceKeys,
+	}
 
 	switch cfg.(*Config).RoutingKey {
 	case "service", "":
@@ -88,7 +93,7 @@ func (e *metricExporterImp) ConsumeMetrics(ctx context.Context, md pmetric.Metri
 	endpoints := make(map[*wrappedExporter]string)
 
 	for _, batch := range batches {
-		routingIDs, err := routingIdentifiersFromMetrics(batch, e.routingKey)
+		routingIDs, err := routingIdentifiersFromMetrics(batch, e.routingKey, e.resourceKeys)
 		if err != nil {
 			return err
 		}
@@ -135,7 +140,7 @@ func (e *metricExporterImp) ConsumeMetrics(ctx context.Context, md pmetric.Metri
 	return errs
 }
 
-func routingIdentifiersFromMetrics(mds pmetric.Metrics, key routingKey) (map[string]bool, error) {
+func routingIdentifiersFromMetrics(mds pmetric.Metrics, key routingKey, resourceKeys []string) (map[string]bool, error) {
 	ids := make(map[string]bool)
 
 	// no need to test "empty labels"
@@ -182,7 +187,7 @@ func routingIdentifiersFromMetrics(mds pmetric.Metrics, key routingKey) (map[str
 				metrics := sm.At(j).Metrics()
 				for k := 0; k < metrics.Len(); k++ {
 					md := metrics.At(k)
-					rKey := resourceRoutingKey(md, resource.Attributes())
+					rKey := resourceRoutingKey(md, resource.Attributes(), resourceKeys)
 					ids[rKey] = true
 				}
 			}
@@ -199,6 +204,7 @@ func sortedMapAttrs(attrs pcommon.Map) []string {
 	for k := range attrs.AsRaw() {
 		keys = append(keys, k)
 	}
+
 	sort.Strings(keys)
 
 	attrsHash := make([]string, 0)
@@ -211,8 +217,27 @@ func sortedMapAttrs(attrs pcommon.Map) []string {
 	return attrsHash
 }
 
-func resourceRoutingKey(md pmetric.Metric, attrs pcommon.Map) string {
-	attrsHash := sortedMapAttrs(attrs)
+func sortedMapSelectedAttrs(attrs pcommon.Map, resourceKeys []string) []string {
+	sort.Strings(resourceKeys)
+	attrsHash := make([]string, 0)
+	for _, k := range resourceKeys {
+		if v, ok := attrs.Get(k); ok {
+            // Key should be included in the routing ref if it has a value for the
+            // given metrics
+			attrsHash = append(attrsHash, k)
+			attrsHash = append(attrsHash, v.AsString())
+		}
+	}
+	return attrsHash
+}
+
+func resourceRoutingKey(md pmetric.Metric, attrs pcommon.Map, resourceKeys []string) string {
+	var attrsHash []string
+	if len(resourceKeys) > 0 {
+		attrsHash = sortedMapSelectedAttrs(attrs, resourceKeys)
+	} else {
+		attrsHash = sortedMapAttrs(attrs)
+	}
 	attrsHash = append(attrsHash, md.Name())
 	routingRef := strings.Join(attrsHash, "")
 

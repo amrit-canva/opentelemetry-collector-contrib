@@ -362,20 +362,29 @@ func TestConsumeMetricsMetricNameBased(t *testing.T) {
 func TestServiceBasedRoutingForSameMetricName(t *testing.T) {
 
 	for _, tt := range []struct {
-		desc       string
-		batch      pmetric.Metrics
-		routingKey routingKey
-		res        map[string]bool
+		desc        string
+		batch       pmetric.Metrics
+		routingKey  routingKey
+		res         map[string]bool
+		resourceKey []string
 	}{
 		{
 			"different services - service based routing",
 			twoServicesWithSameMetricName(),
 			svcRouting,
 			map[string]bool{serviceName1: true, serviceName2: true},
+			make([]string, 0),
+		},
+		{
+			"different services - service based routing",
+			twoServicesWithSameMetricName(),
+			svcRouting,
+			map[string]bool{serviceName1: true, serviceName2: true},
+			[]string{"attr1", "attr2"},
 		},
 	} {
 		t.Run(tt.desc, func(t *testing.T) {
-			res, err := routingIdentifiersFromMetrics(tt.batch, tt.routingKey)
+			res, err := routingIdentifiersFromMetrics(tt.batch, tt.routingKey, tt.resourceKey)
 			assert.Equal(t, err, nil)
 			assert.Equal(t, res, tt.res)
 		})
@@ -545,7 +554,7 @@ func TestNoMetricsInBatch(t *testing.T) {
 		},
 	} {
 		t.Run(tt.desc, func(t *testing.T) {
-			res, err := routingIdentifiersFromMetrics(tt.batch, tt.routingKey)
+			res, err := routingIdentifiersFromMetrics(tt.batch, tt.routingKey, make([]string, 0))
 			assert.Equal(t, err, tt.err)
 			assert.Equal(t, res, map[string]bool(nil))
 		})
@@ -557,19 +566,72 @@ func TestResourceRoutingKey(t *testing.T) {
 	md := pmetric.NewMetric()
 	md.SetName("metric")
 	attrs := pcommon.NewMap()
-	if got := resourceRoutingKey(md, attrs); got != "metric" {
+    // If resource attibute keys are not specified, all resource attributes are
+    // used for routing
+	if got := resourceRoutingKey(md, attrs, make([]string, 0)); got != "metric" {
 		t.Errorf("metricRoutingKey() = %v, want %v", got, "metric")
 	}
 
 	attrs.PutStr("k1", "v1")
-	if got := resourceRoutingKey(md, attrs); got != "k1v1metric" {
+	if got := resourceRoutingKey(md, attrs, make([]string, 0)); got != "k1v1metric" {
 		t.Errorf("metricRoutingKey() = %v, want %v", got, "k1v1metric")
 	}
 
 	attrs.PutStr("k2", "v2")
-	if got := resourceRoutingKey(md, attrs); got != "k1v1k2v2metric" {
+	if got := resourceRoutingKey(md, attrs, make([]string, 0)); got != "k1v1k2v2metric" {
 		t.Errorf("metricRoutingKey() = %v, want %v", got, "k1v1k2v2metric")
 	}
+
+    // Test that resource attributes are sorted before used as routing ref
+	attrs = pcommon.NewMap()
+	attrs.PutStr("k1", "v1")
+	attrs.PutStr("k2", "v2")
+	attrs.PutStr("k9", "v9")
+	attrs.PutStr("k3", "v3")
+	attrs.PutStr("k6", "v6")
+    x_routing_ref := "k1v1k2v2k3v3k6v6k9v9metric"
+	if got := resourceRoutingKey(md, attrs, make([]string, 0)); got != x_routing_ref {
+		t.Errorf("metricRoutingKey() = %v, want %v", got, x_routing_ref)
+	}
+
+    // If resource attribute keys are specified, then the keys that are present
+    // in resource attributes are used for routing
+	attrs = pcommon.NewMap()
+	if got := resourceRoutingKey(md, attrs, []string{"k1"}); got != "metric" {
+		t.Errorf("metricRoutingKey() = %v, want %v", got, "metric")
+	}
+
+	attrs.PutStr("k1", "v1")
+	if got := resourceRoutingKey(md, attrs, []string{"k1"}); got != "k1v1metric" {
+		t.Errorf("metricRoutingKey() = %v, want %v", got, "k1v1metric")
+	}
+
+	attrs.PutStr("k2", "v2")
+	if got := resourceRoutingKey(md, attrs, []string{"k1"}); got != "k1v1metric" {
+		t.Errorf("metricRoutingKey() = %v, want %v", got, "k1v1metric")
+	}
+
+	if got := resourceRoutingKey(md, attrs, []string{"k1", "k2"}); got != "k1v1k2v2metric" {
+		t.Errorf("metricRoutingKey() = %v, want %v", got, "k1v1k2v2metric")
+	}
+
+	if got := resourceRoutingKey(md, attrs, []string{"k1", "k2", "k3"}); got != "k1v1k2v2metric" {
+		t.Errorf("metricRoutingKey() = %v, want %v", got, "k1v1k2v2metric")
+	}
+
+    // Test that resource attributes are sorted before used as routing ref
+    // Also only selected resurce keys are included
+	attrs = pcommon.NewMap()
+	attrs.PutStr("k1", "v1")
+	attrs.PutStr("k2", "v2")
+	attrs.PutStr("k9", "v9")
+	attrs.PutStr("k3", "v3")
+	attrs.PutStr("k6", "v6")
+    x_routing_ref = "k1v1k6v6k9v9metric"
+	if got := resourceRoutingKey(md, attrs, []string{"k9","k1","k6"}); got != x_routing_ref {
+		t.Errorf("metricRoutingKey() = %v, want %v", got, x_routing_ref)
+	}
+
 }
 
 func TestMetricNameRoutingKey(t *testing.T) {

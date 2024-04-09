@@ -38,3 +38,15 @@ loadbalancing/4:
       namespace: cloudmap-1
       serviceName: service-1
       port: 4319
+
+loadbalancing/5:
+  protocol:
+    otlp:
+  routing_key: resource
+  resource_key:
+    - k1
+    - k2
+
+  resolver:
+    dns:
+      hostname: service-1 # assumes 4317 as the default port for the resolved IP addresses

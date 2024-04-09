@@ -82,10 +82,19 @@ Refer to [config.yaml](./testdata/config.yaml) for detailed examples on using th
   * **Notes:** 
     * This resolver currently returns a maximum of 100 hosts. 
     * `TODO`: Feature request [29771](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/29771) aims to cover the pagination for this scenario
-* The `routing_key` property is used to route spans to exporters based on different parameters. This functionality is currently enabled only for `trace` pipeline types. It supports one of the following values:
-    * `service`: exports spans based on their service name. This is useful when using processors like the span metrics, so all spans for each service are sent to consistent collector instances for metric collection. Otherwise, metrics for the same services are sent to different collectors, making aggregations inaccurate. 
-    * `traceID` (default): exports spans based on their `traceID`.
-    * If not configured, defaults to `traceID` based routing.
+* The `routing_key` property is used to route spans to exporters based on different parameters. This functionality is currently enabled only for `trace` and `metrics` pipeline types. It supports following values for different pipeline types:
+    * Trace
+      * `service`: exports spans based on their service name. This is useful when using processors like the span metrics, so all spans for each service are sent to consistent collector instances for metric collection. Otherwise, metrics for the same services are sent to different collectors, making aggregations inaccurate. 
+      * `traceID` (default): exports spans based on their `traceID`.
+      * If not configured, defaults to `traceID` based routing.
+    * Metrics
+      * `service`: exports metrics samples based on their service name.
+      * `metric`: exports metrics samples based on the metric name.
+      * `resource`: exports metrics samples based on the resource attributes and metric name. By default all resource attributes available on the metric are used. Optionaly a list of resource attribute keys can be provided in config option `resource_keys`.
+* `resource_keys` option can be used for optionally specifying a list of resource attribute keys that if present in the metric are used for routing metrics in addition to metric name.
+  If no keys are provided using this option, then by default all resource attributes available on the metrics are used for routing in addition to the metrics name. This option is
+  currently only used for metrics.
+
 
 Simple example
 ```yaml
